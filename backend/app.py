@@ -185,9 +185,8 @@ def process_image(current_user):
         os.remove(temp_path)
 
         return jsonify({
-            'suspicious_activity': suspicious_activity,
-            'edge_density': edge_density,
-            'message': 'Image processed successfully'
+            'edge_density': float(edge_density),
+            'suspicious_activity': bool(suspicious_activity)
         }), 200
 
     except Exception as e:

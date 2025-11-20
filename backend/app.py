@@ -169,10 +169,48 @@ def process_image(current_user):
         # Apply Canny edge detection
         edges = cv2.Canny(noise_reduced_image, 50, 150)
 
+        # Detect faces
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        face_cascade = cv2.CascadeClassifier(cascade_path)
+        if face_cascade.empty():
+            raise RuntimeError(f"Unable to load face cascade from {cascade_path}")
+        faces = face_cascade.detectMultiScale(
+            grayscale_image,
+            scaleFactor=1.1,
+            minNeighbors=7,
+            minSize=(40, 40)
+        )
+
+        def filter_faces(face_list, frame_shape):
+            height, width = frame_shape[:2]
+            frame_area = float(width * height)
+            min_area_ratio = 0.02
+            max_area_ratio = 0.45
+            min_aspect_ratio = 0.75
+            max_aspect_ratio = 1.35
+
+            filtered = []
+            for (x, y, w, h) in face_list:
+                area_ratio = (w * h) / frame_area
+                aspect_ratio = w / float(h)
+                if not (min_area_ratio <= area_ratio <= max_area_ratio):
+                    continue
+                if not (min_aspect_ratio <= aspect_ratio <= max_aspect_ratio):
+                    continue
+                if y < 10 or x < 10:
+                    # likely noisy detections along the border
+                    continue
+                filtered.append((x, y, w, h))
+            return filtered
+
+        filtered_faces = filter_faces(faces, resized_image.shape)
+
         # Analyze the edges for suspicious activity
         # Here we're using a simple heuristic: if there are too many edges, it might indicate movement
         edge_density = np.sum(edges > 0) / (edges.shape[0] * edges.shape[1])
-        suspicious_activity = edge_density > 0.3  # Adjust this threshold as needed
+        movement_threshold = 0.3
+        suspicious_activity = edge_density > movement_threshold  # Adjust this threshold as needed
+        activity_confidence = min(edge_density / movement_threshold, 1.0)
 
         # Update test record if suspicious activity is detected
         if suspicious_activity:
@@ -186,7 +224,11 @@ def process_image(current_user):
 
         return jsonify({
             'edge_density': float(edge_density),
-            'suspicious_activity': bool(suspicious_activity)
+            'suspicious_activity': bool(suspicious_activity),
+            'activity_confidence': float(activity_confidence),
+            'faces_detected': len(filtered_faces),
+            'face_boxes': [{'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h)} for (x, y, w, h) in filtered_faces],
+            'processed_at': datetime.utcnow().isoformat() + 'Z'
         }), 200
 
     except Exception as e:
